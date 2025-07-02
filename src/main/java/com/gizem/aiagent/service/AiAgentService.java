@@ -31,16 +31,16 @@ public class AiAgentService {
         try {
             // 1. Together'a gönderilecek prompt
             String prompt = """
-                    Extract the job title and city from the user message.
-                        Return only JSON in this format:
-                        {
-                          "city": "city name",
-                          "title": "job title keyword, for example backend, frontend, mobile"
-                        }
-                        User: %s
-                    """.formatted(userMessage);
+            Extract the job title and city from the user message.
+            Return only JSON in this format:
+            {
+              "city": "city name",
+              "title": "job title keyword, for example backend, frontend, mobile"
+            }
+            User: %s
+        """.formatted(userMessage);
 
-            // 2. Together request body
+            // 2. Together API'ye istek
             Map<String, Object> body = new HashMap<>();
             body.put("model", "mistralai/Mixtral-8x7B-Instruct-v0.1");
 
@@ -67,20 +67,49 @@ public class AiAgentService {
             Map<String, Object> message = (Map<String, Object>) choices.get("message");
             String content = (String) message.get("content");
 
-            // 3. JSON içeriğini ayıkla
+            // 3. Together cevabını işle
             Map<String, String> jobParams = objectMapper.readValue(content.trim(), Map.class);
             String city = jobParams.getOrDefault("city", "");
             String title = jobParams.getOrDefault("title", "");
 
-            // 4. job-search-service'e istek
-            String searchUrl = jobSearchUrl + "/search?title=" + title + "&city=" + city;
+            // 4. Job Search Servisi'ne istek
+            String searchUrl = jobSearchUrl + "/api/v1/jobs/search?title=" + title + "&city=" + city;
             ResponseEntity<String> jobResults = restTemplate.getForEntity(searchUrl, String.class);
 
-            return "AI search results for: " + title + " in " + city + "\n\n" + jobResults.getBody();
+            Map<String, Object> resultMap = objectMapper.readValue(jobResults.getBody(), Map.class);
+            List<Map<String, Object>> jobs = (List<Map<String, Object>>) resultMap.get("content");
+
+            if (jobs.isEmpty()) {
+                return "\nÜzgünüm 😔 Şu anda " + city + " şehrinde '" + title + "' pozisyonunda bir iş bulamadım. Yeni fırsatlar eklenince tekrar deneyebilirsin!";
+            }
+
+            StringBuilder sb = new StringBuilder("\nHarika haber!  " + city + " şehrinde '" + title + "' pozisyonu için bazı işler buldum:\n\n");
+
+            for (Map<String, Object> job : jobs) {
+                String company = (job.get("company") != null) ? job.get("company").toString() : "Belirtilmemiş";
+                String jobTitle = job.get("title").toString();
+                String desc = job.get("description").toString();
+                String loc = job.get("city") + ", " + job.get("country");
+                String updated = job.get("lastUpdated").toString().split("T")[0];
+                int apps = (int) job.getOrDefault("applicationCount", 0);
+
+                sb.append("🔸 '").append(jobTitle).append("' pozisyonu ").append(company)
+                        .append(" şirketinde açık.\n")
+                        .append(" \nKonum: ").append(loc).append("\n")
+                        .append(" \nAçıklama: ").append(desc).append("\n")
+                        .append("\n Son güncelleme: ").append(updated).append("\n")
+                        .append("\n Şu ana kadar ").append(apps).append(" kişi başvurmuş.\n\n");
+            }
+
+            sb.append("\n 😊 Bol şans!  İş başvurularında yanında olmak için buradayım 😊");
+
+            return sb.toString();
 
         } catch (Exception e) {
             e.printStackTrace();
-            return "Sorry, AI could not respond.";
+            return "Oops! Bir şeyler ters gitti 😵 AI şu anda cevap veremiyor, lütfen daha sonra tekrar dene.";
         }
     }
+
+
 }
